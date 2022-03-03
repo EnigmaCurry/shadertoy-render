@@ -99,7 +99,7 @@ preamble_lines = fragment_template.split("\n").index("%s")
 error_shader = """
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
-    discard;
+    fragColor = vec4(1.,0.,1.,1.0);
 }
 """
 
@@ -436,8 +436,8 @@ class RenderingCanvas(app.Canvas):
                 errors = self.process_errors(errors)
                 print("Shader failed to compile:", file=sys.stderr)
                 print(errors, file=sys.stderr)
-                exit(1)
-                
+                # exit(1)
+
                 # Switch to error shader
 
                 self._glsl = error_shader
