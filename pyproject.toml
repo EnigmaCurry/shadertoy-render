@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "shadertoy-to-video-with-fbo"
+version = "0.1.0"
+description = ""
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^1.22.2"
+vispy = "^0.9.6"
+watchdog = "^2.1.6"
+Pillow = "^9.0.1"
+pyglet = "^1.5.22"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
