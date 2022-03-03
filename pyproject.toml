@@ -2,6 +2,7 @@
 name = "shadertoy-to-video-with-fbo"
 version = "0.1.0"
 description = ""
+authors = ["EnigmaCurry"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
