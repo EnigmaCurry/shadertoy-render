@@ -118,6 +118,20 @@ def noise(resolution=64, nchannels=1):
     return numpy.random.randint(low=0, high=256, size=size).astype(numpy.uint8)
 
 
+def load_glsl(path):
+    """Load GLSL code processing #include directives"""
+
+    def read(path):
+        return open(path, "r").read().encode("ascii", errors="ignore").decode()
+
+    main_src = read(path)
+    src = []
+    for include in re.findall("^#include (.*)$", main_src, re.MULTILINE):
+        src.append(read(include))
+    src.append(re.sub("^#include .*$", "", main_src, flags=re.MULTILINE))
+    return "\n".join(src)
+
+
 class RenderingCanvas(app.Canvas):
     def __init__(
         self,
@@ -275,29 +289,12 @@ class RenderingCanvas(app.Canvas):
 
     def set_BufX(self):
         self._bufXglsl = []
-        self._common_file = ""
-        try:
-            self._common_file = (
-                open("Common.glsl", "r")
-                .read()
-                .encode("ascii", errors="ignore")
-                .decode()
-            )
-        except FileNotFoundError:
-            print("Common.glsl file not used")
         for i in range(max_iChannels):
             try:
-                self._bufXglsl.append(
-                    self._common_file
-                    + "\n"
-                    + open("Buf%d.glsl" % i, "r")
-                    .read()
-                    .encode("ascii", errors="ignore")
-                    .decode()
-                )
+                self._bufXglsl.append(load_glsl("Buf%d.glsl" % i))
             except FileNotFoundError:
-                print("FIle not found, used empty shader instead" + (" Buf%d.glsl" % i))
-                self._bufXglsl.append(self._common_file + "\n" + error_shader)
+                print("File not found, used empty shader instead" + (" Buf%d.glsl" % i))
+                self._bufXglsl.append(error_shader)
                 continue
 
     def set_Buf_uniform(self, uni, val):
@@ -379,7 +376,8 @@ class RenderingCanvas(app.Canvas):
             self.program["iChannelResolution[%d]" % i] = self._output_size + (0.0,)
 
     def set_shader(self, glsl):
-        self._glsl = self._common_file + "\n" + glsl
+        print(glsl)
+        self._glsl = glsl
 
     def advance_time(self):
         if not self._paused:
@@ -762,12 +760,7 @@ class ShaderWatcher(FileSystemEventHandler):
         if os.path.abspath(event.src_path) == self._filename:
             print("Updating shader...")
 
-            glsl_shader = (
-                open(self._filename, "r")
-                .read()
-                .encode("ascii", errors="ignore")
-                .decode()
-            )
+            glsl_shader = load_glsl(self._filename)
 
             self._canvas.set_shader(glsl_shader)
             self._canvas.update()
@@ -898,7 +891,7 @@ if __name__ == "__main__":
         interval = 1.0 / float(args.rate)
 
     filepath = os.path.abspath(args.input)
-    glsl_shader = open(args.input, "r").read().encode("ascii", errors="ignore").decode()
+    glsl_shader = load_glsl(args.input)
 
     observer = None
     ffmpeg = None

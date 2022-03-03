@@ -1,3 +1,4 @@
+#include Common.glsl
 
 #define iChannel0 u_channel3
 
