@@ -7,6 +7,7 @@
 # Distributed under the (new) BSD License.
 
 # modified, 2018, Danil
+# modified, 2022, EnigmaCurry
 
 from __future__ import unicode_literals, print_function
 
@@ -119,17 +120,29 @@ def noise(resolution=64, nchannels=1):
 
 
 def load_glsl(path):
-    """Load GLSL code processing #include directives"""
+    """Load GLSL code processing #include and #buffer directives
+
+    Returns the tuple of (glsl_source, list_of_buffer_names) where:
+
+    glsl_source is the final glsl source code with included files pasted inline
+    list_of_buffer_names is a list of all the named #buffers.
+    """
 
     def read(path):
         return open(path, "r").read().encode("ascii", errors="ignore").decode()
 
     main_src = read(path)
+
+    buffers = []
+    for b in re.findall("^#buffer (.*)$", main_src, re.MULTILINE):
+        buffers.append(b)
+
     src = []
     for include in re.findall("^#include (.*)$", main_src, re.MULTILINE):
         src.append(read(include))
-    src.append(re.sub("^#include .*$", "", main_src, flags=re.MULTILINE))
-    return "\n".join(src)
+    src.append(re.sub("^#(include|buffer) .*$", "", main_src, flags=re.MULTILINE))
+
+    return ("\n".join(src), buffers)
 
 
 class RenderingCanvas(app.Canvas):
@@ -149,6 +162,8 @@ class RenderingCanvas(app.Canvas):
         output=None,
         progress_file=None,
         ffmpeg_pipe=None,
+        force_aspect=False,
+        buffer_sources=[],
     ):
 
         app.Canvas.__init__(
@@ -156,7 +171,7 @@ class RenderingCanvas(app.Canvas):
             keys=("interactive" if interactive else None),
             size=(render_size if render_size else output_size),
             position=None,
-            title=filename,
+            title=f"shadertoy {filename}",
             always_on_top=always_on_top,
             show=False,
             resizable=ffmpeg_pipe is None,
@@ -175,6 +190,8 @@ class RenderingCanvas(app.Canvas):
         self._start_time = start_time
         self._interval = interval
         self._ffmpeg_pipe = ffmpeg_pipe
+        self._force_aspect = force_aspect
+        self._buffer_sources = buffer_sources
 
         # Determine number of frames to render
 
@@ -242,8 +259,10 @@ class RenderingCanvas(app.Canvas):
 
         for x in range(0, max_iTextures):
             try:
-                self.set_texture_input(read_png(str(x) + ".png"), i=x)
-                self.set_Buf_texture_input(read_png(str(x) + ".png"), i=x)
+                png = read_png(str(x) + ".png")
+                png = numpy.flip(png, 0)
+                self.set_texture_input(png, i=x)
+                self.set_Buf_texture_input(png, i=x)
             except FileNotFoundError:
                 self.set_texture_input(noise(resolution=2, nchannels=3), i=x)
                 self.set_Buf_texture_input(noise(resolution=2, nchannels=3), i=x)
@@ -288,12 +307,19 @@ class RenderingCanvas(app.Canvas):
             self.ensure_timer()
 
     def set_BufX(self):
+        if len(self._buffer_sources) > max_iChannels:
+            raise AssertionError(
+                f"Too many buffers found ({len(self._buffer_sources)}). "
+                f"max_iChannels={max_iChannels}"
+            )
         self._bufXglsl = []
-        for i in range(max_iChannels):
+        for b in self._buffer_sources:
+            # print(f"Loading buffer: {b}")
             try:
-                self._bufXglsl.append(load_glsl("Buf%d.glsl" % i))
+                src, _ = load_glsl(b)
+                self._bufXglsl.append(src)
             except FileNotFoundError:
-                print("File not found, used empty shader instead" + (" Buf%d.glsl" % i))
+                print(f"Buffer source not found: {b}")
                 self._bufXglsl.append(error_shader)
                 continue
 
@@ -376,7 +402,6 @@ class RenderingCanvas(app.Canvas):
             self.program["iChannelResolution[%d]" % i] = self._output_size + (0.0,)
 
     def set_shader(self, glsl):
-        print(glsl)
         self._glsl = glsl
 
     def advance_time(self):
@@ -399,7 +424,7 @@ class RenderingCanvas(app.Canvas):
         self._ffmpeg_pipe.write(img.tobytes())
 
     def draw(self):
-        for i in range(max_iChannels):
+        for i in range(len(self._buffer_sources)):
             if self._bufXglsl[i]:
                 fragment = fragment_template % self._bufXglsl[i]
                 self._bufXglsl[i] = None
@@ -412,7 +437,11 @@ class RenderingCanvas(app.Canvas):
                     errors = self.process_errors(errors)
                     print("Shader failed to compile:", file=sys.stderr)
                     print(errors, file=sys.stderr)
-                    exit(1)
+                    # exit(1)
+                    # Switch to error shader
+
+                    self._glsl = error_shader
+                    self.update()
                 else:
                     self._BufX[i].set_shaders(vertex, fragment)
                 gl.glDeleteShader(frag_handle)
@@ -449,7 +478,7 @@ class RenderingCanvas(app.Canvas):
                 with self._fboX[self._doubleFboid][i]:
                     gloo.set_clear_color((0.0, 0.0, 0.0, 0.0))
                     gloo.clear(color=True, depth=True)
-                    gloo.set_viewport(0, 0, *self.physical_size)
+                    self._fix_viewport()
                     self._BufX[i].draw()
 
             self.program.draw()
@@ -485,7 +514,7 @@ class RenderingCanvas(app.Canvas):
                 with self._fboX[self._doubleFboid][i]:
                     gloo.set_clear_color((0.0, 0.0, 0.0, 0.0))
                     gloo.clear(color=True, depth=True)
-                    gloo.set_viewport(0, 0, *self.physical_size)
+                    self._fix_viewport()
                     self._BufX[i].draw()
 
             with self._fbo:
@@ -676,14 +705,34 @@ class RenderingCanvas(app.Canvas):
         if not self._ffmpeg_pipe:
             self.activate_zoom()
 
-    def activate_zoom(self):
-        if self._interactive:
+    def _fix_viewport(self):
+        if self._force_aspect:
+            x1 = y1 = 0
+            x2, y2 = self._output_size
+            if self.physical_size[0] > self._output_size[0]:
+                x1 = (self.physical_size[0] - self._output_size[0]) / 2
+            if self.physical_size[1] > self._output_size[1]:
+                y1 = (self.physical_size[1] - self._output_size[1]) / 2
+            gloo.set_viewport(x1, y1, x2, y2)
+            self.program["iResolution"] = (
+                *self._output_size,
+                0.0,
+            )
+            self.program["iOffset"] = (-x1, -y1)
+        else:
             gloo.set_viewport(0, 0, *self.physical_size)
             self.program["iResolution"] = (
                 self.physical_size[0],
                 self.physical_size[1],
                 0.0,
             )
+            self.program["iOffset"] = (0, 0)
+        self.set_Buf_uniform("iResolution", self.program["iResolution"])
+        self.set_Buf_uniform("iOffset", self.program["iOffset"])
+
+    def activate_zoom(self):
+        if self._interactive:
+            self._fix_viewport()
 
     def process_errors(self, errors):
 
@@ -757,12 +806,15 @@ class ShaderWatcher(FileSystemEventHandler):
         self._canvas = canvas
 
     def on_modified(self, event):
-        if os.path.abspath(event.src_path) == self._filename:
+        if os.path.abspath(event.src_path) == self._filename or event.src_path.endswith(
+            ".glsl"
+        ):
             print("Updating shader...")
 
-            glsl_shader = load_glsl(self._filename)
+            glsl_shader, buffer_sources = load_glsl(self._filename)
 
             self._canvas.set_shader(glsl_shader)
+            self._canvas.set_BufX()
             self._canvas.update()
 
 
@@ -783,7 +835,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--size",
         type=str,
-        default="1280x720",
+        default=None,
         help="Width and height of the viewport/output, e.g. 1920x1080 (string).",
     )
     parser.add_argument(
@@ -796,7 +848,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--rate",
         type=int,
-        default=None,
+        default=60,
         help="Number of frames per second to render, e.g. 60 (int).",
     )
     parser.add_argument(
@@ -838,6 +890,12 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    if not args.size:
+        args.size = "1280x720"
+        force_aspect = False
+    else:
+        force_aspect = True
 
     resolution = tuple(int(i) for i in args.size.split("x"))
     position = (
@@ -891,7 +949,7 @@ if __name__ == "__main__":
         interval = 1.0 / float(args.rate)
 
     filepath = os.path.abspath(args.input)
-    glsl_shader = load_glsl(args.input)
+    glsl_shader, buffer_sources = load_glsl(args.input)
 
     observer = None
     ffmpeg = None
@@ -1007,6 +1065,8 @@ if __name__ == "__main__":
         output=args.output,
         progress_file=args.progress_file,
         ffmpeg_pipe=ffmpeg_pipe,
+        force_aspect=force_aspect,
+        buffer_sources=buffer_sources,
     )
 
     if not args.output:

@@ -1,6 +1,10 @@
 // self https://www.shadertoy.com/view/WlcBWr
 
 #include Common.glsl
+#buffer Buf0.glsl
+#buffer Buf1.glsl
+#buffer Buf2.glsl
+#buffer Buf3.glsl
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {

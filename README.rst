@@ -3,9 +3,42 @@ shadertoy-render
 
 **What is it**: creating video from shaders on Shadertoy. Fork from `original <https://github.com/alexjc/shadertoy-render>`_, source code edited.
 
-**Uploading created video to Twitter/Instagram** - pixel format set to *yuv420p* for *libx264* codec and video can be uploaded to any social platform without problems.
+**Uploading created video to Twitter/Instagram** - pixel format set to *yuv420p* for *libx264** codec and video can be uploaded to any social platform without problems.
 
 Nor supported - Cubemaps, Shader-Cubemap, 3d texture, audio and video input also not supported.
+
+**Update 2022 (EnigmaCurry):**
+----------------
+
+Install with `Poetry <https://python-poetry.org/>`_:
+
+    git clone https://github.com/EnigmaCurry/shadertoy-render.git \
+       ~/git/vendor/enigmacurry/shadertoy-render
+    cd ~/git/vendor/enigmacurry/shadertoy-render
+    poetry install
+
+    ## Optional, add a bash alias to ~/.bashrc
+
+    echo alias shadertoy=\"$(poetry run which python) $(pwd)/shadertoy-render.py\" >> ~/.bashrc
+
+With the alias installed (and restart your shell), you can this from any directory:
+
+    shadertoy shader.glsl
+
+**Changelog**
+
+1. Added Poetry dependency management.
+2. Implemented `#include` directives so you can load third party `.glsl`
+   libraries. This removes the hardcoded `Common.glsl` pattern and updates the
+   old examples to use `#include`.
+3. Implemented `#buffer` directives to load buffer shaders arbitrarily from a
+   main glsl file. Live reload works for all buffers. This replaces the
+   hard-coded BufX.glsl loading.
+4. Re-enabled the error shader with a pink value. This prevents the program from
+   quitting when the shader has a compilation error during live-reload, but
+   makes it easy to tell there's a problem. (I wonder if the error shader could
+   print the text of the error somehow??)
+
 
 **Update 2021:**
 -----------------
